@@ -35,17 +35,12 @@
             "type": "shell",
             "inline": ["./setup.sh {{user `efsid`}}"]
         }
-            {
+        {
             "type": "shell",
             "inline": [
             "chmod +x setup.sh",
-            "./setup.sh"
-            ]
+            "./setup.sh"]
         }
-
-
-      
     ]
-
 }
 
