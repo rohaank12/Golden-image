@@ -1,11 +1,10 @@
-
 {
     "variables": {
         "aws_access_key": "{{env `AWS_ACCESS_KEY_ID`}}",
         "aws_secret_key": "{{env `AWS_SECRET_ACCESS_KEY`}}",
-        "region":         "ap-south-1",
-        "baseimage":       "ami-0522ab6e1ddcc7055",
-        "efsid": "" 
+        "region": "ap-south-1",
+        "baseimage": "ami-0522ab6e1ddcc7055",
+        "efsid": ""
     },
     "builders": [
         {
@@ -20,7 +19,7 @@
             "type": "amazon-ebs"
         }
     ],
-  "provisioners": [
+    "provisioners": [
         {
             "type": "file",
             "source": "./jenkinsrole.tar",
@@ -29,18 +28,14 @@
         {
             "type": "file",
             "source": "./setup.sh",
-            "destination": "/home/ubuntu/"
+            "destination": "/home/ubuntu/setup.sh"
         },
         {
             "type": "shell",
-            "inline": ["./setup.sh {{user `efsid`}}"]
-        }
-        {
-            "type": "shell",
             "inline": [
-            "chmod +x setup.sh",
-            "./setup.sh"]
+                "chmod +x /home/ubuntu/setup.sh",
+                "/home/ubuntu/setup.sh {{user `efsid`}}"
+            ]
         }
     ]
 }
-
