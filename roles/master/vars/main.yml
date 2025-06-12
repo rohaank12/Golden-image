@@ -4,7 +4,7 @@
 #---------------------------------------------#
 
 ---
-java: openjdk-17-jdk
+java: openjdk-21-jdk
 jenkins_repo: https://pkg.jenkins.io/debian-stable
 
 #---------------------------------------------#
