@@ -22,7 +22,7 @@
     - "{{java}}"
     - fontconfig
     - nfs-common
-    - mount # Generally safe to keep, though often already present
+    - mount
 
 - name: ensure jenkins is installed
   ansible.builtin.apt:
@@ -39,8 +39,6 @@
   ansible.builtin.file:
     path: /var/lib/jenkins
     state: directory
-    # No recurse here unless you specifically want to clear existing data.
-    # We will set ownership after the mount.
 
 - name: Ensure EFS is mounted at /var/lib/jenkins and entry exists in /etc/fstab
   ansible.posix.mount:
@@ -61,23 +59,50 @@
 - name: Mount all file systems from fstab (if not already mounted)
   ansible.builtin.command: mount -a
   when: ansible_mounts | selectattr('mount', '==', '/var/lib/jenkins') | list | length == 0
-  # This task is less critical if 'state: mounted' in the previous task worked,
-  # but acts as a safeguard.
 
-- name: Start Jenkins service
+- name: Start Jenkins service for plugin installation
   ansible.builtin.service:
     name: jenkins
     state: started
+  # This start is necessary because the jenkins_plugin module needs Jenkins to be running
+  # to communicate with its API.
 
-- name: Check if port 8080 is listening
+- name: Wait for Jenkins to be ready for API calls
+  ansible.builtin.wait_for:
+    port: 8080
+    host: localhost
+    delay: 10 # Wait 10 seconds before starting to check
+    timeout: 120 # Wait up to 2 minutes for Jenkins to be listening
+
+- name: Install Jenkins Blue Ocean plugin
+  community.general.jenkins_plugin:
+    name: blueocean
+    state: present
+    url: http://localhost:8080 # Assuming Jenkins is accessible on localhost:8080 from the instance
+    timeout: 180 # Give it enough time to download and install
+    updates_expiration: 3600 # Cache plugin updates for 1 hour
+    # Additional options for authentication if Jenkins is secured:
+    # username: admin
+    # password: "{{ jenkins_admin_password }}"
+    # You might need to retrieve the initial admin password from /var/lib/jenkins/secrets/initialAdminPassword
+    # or ensure Jenkins is running without security temporarily for plugin installs if possible during AMI build.
+
+- name: Ensure Jenkins service is restarted after plugin installation (if required)
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted # Use 'restarted' to ensure plugin takes effect
+  when: jenkins_plugin.changed # Only restart if a plugin was actually installed/updated
+  ignore_errors: yes # In case a restart is not strictly needed or causes a transient error
+
+- name: Check if port 8080 is listening after all installations
   ansible.builtin.wait_for:
     port: 8080
     timeout: 180
-    msg: "Timeout waiting for 8080 to respond"
-  register: port_check
+    msg: "Timeout waiting for 8080 to respond after plugin install"
+  register: port_check_final
   ignore_errors: yes
 
-- name: Print message if Jenkins is not running
+- name: Print message if Jenkins is not running after plugin install
   ansible.builtin.debug:
-    msg: "*== Jenkins NOT Running ==*"
-  when: port_check.failed == true
+    msg: "*== Jenkins NOT Running after Blue Ocean plugin install ==*"
+  when: port_check_final.failed == true
