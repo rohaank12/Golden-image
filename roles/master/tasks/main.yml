@@ -1,108 +1,76 @@
 - name: ensure the jenkins apt repository key is installed
-  ansible.builtin.get_url:
-    url: "{{jenkins_repo}}/jenkins.io-2023.key"
-    dest: "/usr/share/keyrings/jenkins-keyring.asc"
-    mode: '0644' # Recommended permission for keyrings
+  get_url: url="{{jenkins_repo}}/jenkins.io-2023.key" dest="/usr/share/keyrings/jenkins-keyring.asc" 
 
 - name: ensure the repository is configured
-  ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] {{jenkins_repo}} binary/"
-    state: present
-    filename: jenkins # Optional: specify a filename for the repo
+  apt_repository: repo="deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] {{jenkins_repo}} binary/" state=present
 
-- name: Update apt cache
-  ansible.builtin.apt:
+- name: Update and upgrade apt packages
+  apt:
+    upgrade: yes
     update_cache: yes
 
 - name: Install Java & fontconfig
-  ansible.builtin.package:
-    name: "{{ item }}"
-    state: present
+  package: name={{item}} state=present
   loop:
-    - "{{java}}"
-    - fontconfig
-    - nfs-common
-    - mount
+  - openjdk-21-jdk
+  - fontconfig
+  - nfs-common
+  - mount
 
 - name: ensure jenkins is installed
-  ansible.builtin.apt:
-    name: jenkins
-    state: latest
+  apt: name=jenkins state=latest
 
-- name: Stop Jenkins service before EFS mount
-  ansible.builtin.service:
-    name: jenkins
-    state: stopped
-  ignore_errors: yes # In case Jenkins isn't running for the first time
+# - name: Ensure EFS entry exists in /etc/fstab
+#   mount:
+#     path: /var/lib/jenkins
+#     src: "{{efs}}.efs.ap-south-1.amazonaws.com:/"
+#     fstype: nfs4
+#     opts: "_netdev"
+#     state: mounted
 
-- name: Ensure /var/lib/jenkins directory exists
-  ansible.builtin.file:
-    path: /var/lib/jenkins
-    state: directory
+- name: echo efs
+  command: echo "efs"
+  
+- name: Ensure EFS entry exists in /var/lib/jenkins
+  command: sudo mount -t nfs4 -o nfsvers=4.1 {{efs}}.efs.ap-south-1.amazonaws.com:/ /var/lib/jenkins/
 
-- name: Ensure EFS is mounted at /var/lib/jenkins and entry exists in /etc/fstab
-  ansible.posix.mount:
+- name: Ensure EFS entry exists in /etc/fstab
+  mount:
     path: /var/lib/jenkins
     src: "{{efs}}.efs.ap-south-1.amazonaws.com:/"
     fstype: nfs4
-    opts: "nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,_netdev,noatime,nodiratime" # Recommended EFS mount options
-    state: mounted # This will mount it and add to fstab
+    opts: "_netdev"
+    state: mounted
 
-- name: Change permission of mounted EFS back to Jenkins user
-  ansible.builtin.file:
+- name: Ensure EFS entry exists in /etc/fstab
+  mount:
+    path: /var/lib/jenkins
+    src: "{{efs}}.efs.ap-south-1.amazonaws.com:/"
+    fstype: nfs4
+    opts: "_netdev"
+    state: present
+
+- name: Change permission back to Jenkins user
+  file:
     path: /var/lib/jenkins
     owner: jenkins
     group: jenkins
     state: directory
-    recurse: yes # Apply ownership to all contents on the EFS
+    recurse: yes
 
-- name: Mount all file systems from fstab (if not already mounted)
-  ansible.builtin.command: mount -a
+- name: Mount all file systems from fstab
+  command: mount -a
   when: ansible_mounts | selectattr('mount', '==', '/var/lib/jenkins') | list | length == 0
 
-- name: Start Jenkins service for plugin installation
-  ansible.builtin.service:
-    name: jenkins
-    state: started
-  # This start is necessary because the jenkins_plugin module needs Jenkins to be running
-  # to communicate with its API.
-
-- name: Wait for Jenkins to be ready for API calls
-  ansible.builtin.wait_for:
-    port: 8080
-    host: localhost
-    delay: 10 # Wait 10 seconds before starting to check
-    timeout: 120 # Wait up to 2 minutes for Jenkins to be listening
-
-- name: Install Jenkins Blue Ocean plugin
-  community.general.jenkins_plugin:
-    name: blueocean
-    state: present
-    url: http://localhost:8080 # Assuming Jenkins is accessible on localhost:8080 from the instance
-    timeout: 180 # Give it enough time to download and install
-    updates_expiration: 3600 # Cache plugin updates for 1 hour
-    # Additional options for authentication if Jenkins is secured:
-    # username: admin
-    # password: "{{ jenkins_admin_password }}"
-    # You might need to retrieve the initial admin password from /var/lib/jenkins/secrets/initialAdminPassword
-    # or ensure Jenkins is running without security temporarily for plugin installs if possible during AMI build.
-
-- name: Ensure Jenkins service is restarted after plugin installation (if required)
-  ansible.builtin.service:
-    name: jenkins
-    state: restarted # Use 'restarted' to ensure plugin takes effect
-  when: jenkins_plugin.changed # Only restart if a plugin was actually installed/updated
-  ignore_errors: yes # In case a restart is not strictly needed or causes a transient error
-
-- name: Check if port 8080 is listening after all installations
-  ansible.builtin.wait_for:
+- name: Check if port 8080 is listening
+  wait_for:
     port: 8080
     timeout: 180
-    msg: "Timeout waiting for 8080 to respond after plugin install"
-  register: port_check_final
+    msg: "Timeout waiting for 8080 to respond"
+  register: port_check
   ignore_errors: yes
 
-- name: Print message if Jenkins is not running after plugin install
-  ansible.builtin.debug:
-    msg: "*== Jenkins NOT Running after Blue Ocean plugin install ==*"
-  when: port_check_final.failed == true
+- name: Print message if Jenkins is not running
+  debug:
+    msg: "*== Jenkins NOT Running ==*"
+  when: port_check.failed == true
